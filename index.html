@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>拣货清单</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --text: #1c1e21; --sub: #6b7280;
+    --border: #e5e7eb; --accent: #2563eb; --danger: #dc2626; --oos: #fee2e2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181c; --card: #212327; --text: #f0f1f3; --sub: #9aa0a8;
+      --border: #33363b; --accent: #5b9dff; --danger: #f87171; --oos: #4a1f22;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  header {
+    position: sticky; top: 0; z-index: 5; background: var(--bg);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 16px 10px; border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  header .meta { font-size: 12px; color: var(--sub); margin-top: 2px; }
+  button.icon-btn {
+    border: none; background: none; font-size: 20px; padding: 6px 8px;
+    color: var(--sub); cursor: pointer; line-height: 1;
+  }
+  main { padding: 12px 12px 40px; max-width: 640px; margin: 0 auto; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    margin-bottom: 12px; overflow: hidden;
+  }
+  .card summary {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px; font-weight: 600; cursor: pointer; list-style: none;
+  }
+  .card summary::-webkit-details-marker { display: none; }
+  .card summary .badge {
+    font-weight: 400; font-size: 12px; color: var(--sub);
+  }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 8px 14px; font-size: 14px; border-top: 1px solid var(--border); }
+  td.qty { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.lane { color: var(--sub); width: 44px; }
+  tr.oos td { background: var(--oos); }
+  .empty, .error { text-align: center; color: var(--sub); padding: 60px 20px; font-size: 14px; }
+  .error { color: var(--danger); }
+  .error button { margin-top: 12px; }
+  button.primary {
+    background: var(--accent); color: #fff; border: none; border-radius: 8px;
+    padding: 10px 16px; font-size: 14px; cursor: pointer;
+  }
+
+  /* Settings form */
+  #settings { padding: 16px; max-width: 420px; margin: 0 auto; }
+  #settings h2 { font-size: 16px; }
+  #settings p { font-size: 13px; color: var(--sub); line-height: 1.5; }
+  #settings label { display: block; font-size: 13px; margin: 14px 0 6px; color: var(--sub); }
+  #settings input {
+    width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--card); color: var(--text); font-size: 14px;
+  }
+  #settings .row { display: flex; gap: 10px; margin-top: 18px; }
+  #settings .row button { flex: 1; }
+  button.secondary {
+    background: none; border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 10px 16px; font-size: 14px; cursor: pointer;
+  }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="settings" hidden>
+  <h2>连接共享数据库</h2>
+  <p>数据直接从 Turso 只读读取，只在这台手机的浏览器里保存，不会上传到任何地方。</p>
+  <label for="f-url">数据库地址（remoteUrl）</label>
+  <input id="f-url" placeholder="https://xxx-xxx.turso.io 或 libsql://...">
+  <label for="f-token">只读 token（read-only）</label>
+  <input id="f-token" placeholder="用 turso db tokens create --read-only 生成">
+  <label for="f-account">账号 id（默认 dvends）</label>
+  <input id="f-account" placeholder="dvends">
+  <div class="row">
+    <button class="secondary" id="f-cancel" hidden>取消</button>
+    <button class="primary" id="f-save">保存并查看</button>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <div>
+      <h1>拣货清单</h1>
+      <div class="meta" id="updated">—</div>
+    </div>
+    <div>
+      <button class="icon-btn" id="refresh-btn" title="刷新">⟳</button>
+      <button class="icon-btn" id="settings-btn" title="设置">⚙</button>
+    </div>
+  </header>
+  <main id="list"></main>
+</div>
+
+<script>
+(function () {
+  const LS = { url: 'ov_url', token: 'ov_token', account: 'ov_account' };
+  const REFRESH_MS = 30000;
+
+  const settingsView = document.getElementById('settings');
+  const appView = document.getElementById('app');
+  const listEl = document.getElementById('list');
+  const updatedEl = document.getElementById('updated');
+
+  function cfg() {
+    return {
+      url: localStorage.getItem(LS.url) || '',
+      token: localStorage.getItem(LS.token) || '',
+      account: localStorage.getItem(LS.account) || 'dvends',
+    };
+  }
+
+  function endpoint(url) {
+    let u = url.trim().replace(/\/+$/, '');
+    if (u.startsWith('libsql://')) u = 'https://' + u.slice('libsql://'.length);
+    return u + '/v2/pipeline';
+  }
+
+  // Same query as picking_history.py's get-pending-detail, so the phone shows
+  // exactly what the desktop app's in-transit queue shows.
+  const SQL = "SELECT machine, lane_no, product_id, product_name, picked_qty, out_of_stock " +
+    "FROM picking_history WHERE status='pending' AND account=? " +
+    "ORDER BY MIN(id) OVER (PARTITION BY machine), CAST(lane_no AS INTEGER)";
+
+  function decodeCell(cell) {
+    switch (cell.type) {
+      case 'null': return null;
+      case 'integer': return parseInt(cell.value, 10);
+      case 'float': return cell.value;
+      default: return cell.value;
+    }
+  }
+
+  async function queryPending(c) {
+    const res = await fetch(endpoint(c.url), {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + c.token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requests: [
+          { type: 'execute', stmt: { sql: SQL, args: [{ type: 'text', value: c.account }] } },
+          { type: 'close' },
+        ],
+      }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const payload = await res.json();
+    const first = payload.results && payload.results[0];
+    if (!first || first.type === 'error') {
+      throw new Error((first && first.error && first.error.message) || '查询失败');
+    }
+    const result = first.response.result;
+    const cols = result.cols.map(c => c.name);
+    return result.rows.map(row => {
+      const obj = {};
+      row.forEach((cell, i) => { obj[cols[i]] = decodeCell(cell); });
+      return obj;
+    });
+  }
+
+  function groupByMachine(rows) {
+    const map = new Map();
+    for (const r of rows) {
+      if (!map.has(r.machine)) map.set(r.machine, []);
+      map.get(r.machine).push(r);
+    }
+    return map;
+  }
+
+  function render(rows) {
+    if (!rows.length) {
+      listEl.innerHTML = '<div class="empty">当前没有在途拣货项目</div>';
+      return;
+    }
+    const groups = groupByMachine(rows);
+    let html = '';
+    for (const [machine, items] of groups) {
+      const totalQty = items.reduce((s, r) => s + (r.picked_qty || 0), 0);
+      html += `<details class="card" open>
+        <summary>${escapeHtml(machine)} <span class="badge">${items.length} 货道 · ${totalQty} 件</span></summary>
+        <table><tbody>` +
+        items.map(r => `<tr class="${r.out_of_stock ? 'oos' : ''}">
+            <td class="lane">${escapeHtml(r.lane_no ?? '')}</td>
+            <td>${escapeHtml(r.product_name || r.product_id || '')}</td>
+            <td class="qty">${r.picked_qty}</td>
+          </tr>`).join('') +
+        `</tbody></table>
+      </details>`;
+    }
+    listEl.innerHTML = html;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, m => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[m]));
+  }
+
+  let timer = null;
+
+  async function load() {
+    const c = cfg();
+    try {
+      const rows = await queryPending(c);
+      render(rows);
+      updatedEl.textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    } catch (e) {
+      listEl.innerHTML = `<div class="error">加载失败：${escapeHtml(e.message)}<br>
+        <button class="primary" id="retry-btn">重试</button></div>`;
+      document.getElementById('retry-btn').onclick = load;
+    }
+  }
+
+  function showApp() {
+    settingsView.hidden = true;
+    appView.hidden = false;
+    load();
+    if (timer) clearInterval(timer);
+    timer = setInterval(load, REFRESH_MS);
+  }
+
+  function showSettings(cancellable) {
+    if (timer) clearInterval(timer);
+    const c = cfg();
+    document.getElementById('f-url').value = c.url;
+    document.getElementById('f-token').value = c.token;
+    document.getElementById('f-account').value = c.account;
+    document.getElementById('f-cancel').hidden = !cancellable;
+    appView.hidden = true;
+    settingsView.hidden = false;
+  }
+
+  document.getElementById('f-save').onclick = () => {
+    const url = document.getElementById('f-url').value.trim();
+    const token = document.getElementById('f-token').value.trim();
+    const account = document.getElementById('f-account').value.trim() || 'dvends';
+    if (!url || !token) return alert('地址和 token 都要填');
+    localStorage.setItem(LS.url, url);
+    localStorage.setItem(LS.token, token);
+    localStorage.setItem(LS.account, account);
+    showApp();
+  };
+  document.getElementById('f-cancel').onclick = () => showApp();
+  document.getElementById('settings-btn').onclick = () => showSettings(true);
+  document.getElementById('refresh-btn').onclick = load;
+
+  const initial = cfg();
+  if (initial.url && initial.token) showApp(); else showSettings(false);
+})();
+</script>
+</body>
+</html>
