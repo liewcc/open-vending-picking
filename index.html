@@ -112,6 +112,15 @@
   const LS = { url: 'ov_url', token: 'ov_token', account: 'ov_account' };
   const REFRESH_MS = 30000;
 
+  // Read-only Turso token, scoped to SELECT only — safe to ship in this public
+  // page's source. Anyone opening this URL can read pending picks with it, but
+  // never write. Rotate via the Turso dashboard if it ever needs revoking.
+  const DEFAULTS = {
+    url: 'libsql://open-vending-aprillim.aws-ap-northeast-1.turso.io',
+    token: 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicm8iLCJpYXQiOjE3OTAxNDY4OTIsImlkIjoiMDFhMDZiYTYtMTQwMS03YzJiLWIxN2EtZDVkY2YyZmM3NzUzIiwia2lkIjoiV3pISVpDTUdzR0lCMHhUTmxaa0JDTGowZWFnODBJZnFpLUxfQVZ5RU14dyIsInJpZCI6IjllNjg3ZjBkLTk1NTEtNDZiZi1iMjMwLWEzZDFhZjZiZWM1ZCJ9.F7MQfKUijMeM1_FzkKMb_g6Zwk288fMqy9Zy9BgEtgGoEPuE0lAQr7ntzk9pEYFSXDE-7yv524pNg0tzGwuwCA',
+    account: 'dvends',
+  };
+
   const settingsView = document.getElementById('settings');
   const appView = document.getElementById('app');
   const listEl = document.getElementById('list');
@@ -119,9 +128,9 @@
 
   function cfg() {
     return {
-      url: localStorage.getItem(LS.url) || '',
-      token: localStorage.getItem(LS.token) || '',
-      account: localStorage.getItem(LS.account) || 'dvends',
+      url: localStorage.getItem(LS.url) || DEFAULTS.url,
+      token: localStorage.getItem(LS.token) || DEFAULTS.token,
+      account: localStorage.getItem(LS.account) || DEFAULTS.account,
     };
   }
 
